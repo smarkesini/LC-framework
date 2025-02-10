@@ -51,7 +51,7 @@ static __global__ void d_QUANT_ABS_0_f32_kernel(const int len, byte* const __res
     const int bin = (int)roundf(scaled);
     const float recon = bin * eb2;
 
-    if ((bin >= maxbin) || (bin <= -maxbin) || (fabsf(orig_f) >= threshold) || (fabsf(orig_f - recon) > errorbound) || (orig_f != orig_f)) {  // last check is to handle NaNs
+    if ((bin >= maxbin) || (bin <= -maxbin) || (fabsf(orig_f) >= threshold) || (recon < orig_f - errorbound) || (recon > orig_f + errorbound) || (fabsf(orig_f - recon) > errorbound) || (orig_f != orig_f)) {  // last check is to handle NaNs
       assert(((data_i[idx] >> mantissabits) & 0xff) != 0);
     } else {
       data_i[idx] = (bin << 1) ^ (bin >> 31);  // TCMS encoding, 'sign' and 'exponent' fields are zero
@@ -106,3 +106,24 @@ static inline void d_iQUANT_ABS_0_f32(int& size, byte*& data, const int paramc, 
 
   d_iQUANT_ABS_0_f32_kernel<<<(len + TPB - 1) / TPB, TPB>>>(len, data, eb2);
 }
+
+
+
+
+static inline void d_QUANT_ABS_0_f32_stream(int& size, byte*& data, const int paramc, const double paramv [], cudaStream_t streamid)
+{
+  if (size % sizeof(float) != 0) {fprintf(stderr, "QUANT_ABS_0_f32: ERROR: size of input must be a multiple of %ld bytes\n", sizeof(float)); throw std::runtime_error("LC error");}
+  const int len = size / sizeof(float);
+  if ((paramc != 1) && (paramc != 2)) {fprintf(stderr, "USAGE: QUANT_ABS_0_f32(error_bound [, threshold])\n"); throw std::runtime_error("LC error");}
+  const float errorbound = paramv[0];
+  const float threshold = (paramc == 2) ? paramv[1] : std::numeric_limits<float>::infinity();
+  if (errorbound < std::numeric_limits<float>::min()) {fprintf(stderr, "QUANT_ABS_0_f32: ERROR: error_bound must be at least %e\n", std::numeric_limits<float>::min()); throw std::runtime_error("LC error");}  // minimum positive normalized value
+  if (threshold <= errorbound) {fprintf(stderr, "QUANT_ABS_0_f32: ERROR: threshold must be larger than error_bound\n"); throw std::runtime_error("LC error");}
+
+  const float eb2 = 2 * errorbound;
+  const float inv_eb2 = 0.5f / errorbound;
+
+  d_QUANT_ABS_0_f32_kernel<<<(len + TPB - 1) / TPB, TPB, 0, streamid >>>(len, data, errorbound, eb2, inv_eb2, threshold);
+}
+
+
